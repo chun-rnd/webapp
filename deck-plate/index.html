@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="robots" content="noindex, nofollow">
 <meta name="viewport" content="width=1180">
-<title>TB-복공판 구조계산 (OCR)</title>
+<title>TB-복공판 구조계산</title>
 <style>
 input[type=number]{-moz-appearance:textfield;appearance:textfield}input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;appearance:none;margin:0;display:none}
 
@@ -3090,8 +3090,9 @@ d=(g[h++]|g[h++]<<8|g[h++]<<16|g[h++]<<24)>>>0;(a.length&4294967295)!==d&&n(Erro
         scale = scale || 1; angle = angle || 0;
         let s = base('HATCH', layer, o, 'AcDbHatch') + ' 10\n0\n 20\n0\n 30\n0\n210\n0\n220\n0\n230\n1\n  2\n' + pat + '\n 70\n' + (pat === 'SOLID' ? 1 : 0) + '\n 71\n0\n 91\n' + loops.length + '\n';
         loops.forEach(lp => {
-          s += ' 92\n3\n 72\n0\n 73\n1\n 93\n' + lp.length + '\n';
-          lp.forEach(p => { s += ' 10\n' + nf(p[0]) + '\n 20\n' + nf(p[1]) + '\n'; });
+          const hb = lp.some(p => p[2]);                                   // 3번째 값 = bulge (원호 구간)
+          s += ' 92\n3\n 72\n' + (hb ? 1 : 0) + '\n 73\n1\n 93\n' + lp.length + '\n';
+          lp.forEach(p => { s += ' 10\n' + nf(p[0]) + '\n 20\n' + nf(p[1]) + '\n' + (hb ? ' 42\n' + nf(p[2] || 0) + '\n' : ''); });
           s += ' 97\n0\n';
         });
         s += ' 75\n1\n 76\n1\n';
@@ -3120,9 +3121,9 @@ d=(g[h++]|g[h++]<<8|g[h++]<<16|g[h++]<<24)>>>0;(a.length&4294967295)!==d&&n(Erro
     const rect = (L, x0, y0, x1, y1, o) => W.poly(L, [[x0, y0], [x1, y0], [x1, y1], [x0, y1]], true, o);
     D.rect = rect;
     D.text = (L, x, y, str, o) => W.text(L, x, y, (o && o.h) || TH, str, o);
-    D.arrow = (L, x, y, ux, uy) => {                           // (x,y) 가 화살촉 끝, (ux,uy) = 화살표가 가리키는 방향 단위벡터
-      const nx = -uy, ny = ux;
-      W.solid(L, [[x, y], [x - ux * ARW + nx * ARH, y - uy * ARW + ny * ARH], [x - ux * ARW - nx * ARH, y - uy * ARW - ny * ARH]], { c: 1 });
+    D.arrow = (L, x, y, ux, uy, c, aw, ah) => {                // (x,y) 가 화살촉 끝, (ux,uy) = 화살표가 가리키는 방향 단위벡터
+      const nx = -uy, ny = ux; aw = aw || ARW; ah = ah || ARH;
+      W.solid(L, [[x, y], [x - ux * aw + nx * ah, y - uy * aw + ny * ah], [x - ux * aw - nx * ah, y - uy * aw - ny * ah]], { c: c || 1 });
     };
     /* 선형 치수 : orient 'h' = 수평(치수선 y = def), 'v' = 수직(치수선 x = def).  p1,p2 = 측정점, val = 치수문자 */
     D.dim = (orient, p1, p2, def, val, o) => {
@@ -3175,13 +3176,52 @@ d=(g[h++]|g[h++]<<8|g[h++]<<16|g[h++]<<24)>>>0;(a.length&4294967295)!==d&&n(Erro
       const hl = Math.hypot(dx, dy) || 1; D.arrow('TB-LEADER', tx, ty, -dx / hl, -dy / hl);
       D.balloon(kx + sg * (28 + 40.2), ky, n);
     };
-    /* 용접 기호(필릿) : 대상점에서 인출선, 수평 기준선 위에 삼각형 + 치수 */
-    D.weld = (tx, ty, dx, dy, size, o) => {
-      const kx = tx + dx, ky = ty + dy, sg = dx >= 0 ? 1 : -1, ln = 70;
-      W.poly('TB-LEADER', [[tx, ty], [kx, ky], [kx + sg * ln, ky]], false, { c: 1 });
-      const bx = sg > 0 ? kx + 8 : kx - 8 - 18;
-      W.poly('TB-LEADER', [[bx, ky], [bx + 18, ky], [bx, ky + 18]], true, { c: 1 });
-      W.text('TB-TEXT', kx + sg * ln / 2 + (sg > 0 ? 6 : -6), ky + 8, 30, String(size), { ha: 'c', c: 7 });
+    /* 용접 비드 : 접합점 J 를 중심으로 반지름 R 인 1/4 원호로 둘러싸인 채움(SOLID) + 원호.  a, c = 두 변의 축방향 단위벡터 */
+    D.sector = (jx, jy, ax, ay, cx, cy, R) => {
+      const cr = cx * ay - cy * ax, bg = (cr > 0 ? 1 : -1) * 0.41421356237;
+      W.hatch('TB-DETAIL', [[[jx + R * ax, jy + R * ay], [jx, jy], [jx + R * cx, jy + R * cy, bg]]], 'SOLID', 1, 0, { c: 1 });
+      const ang = (x, y) => { let t = Math.atan2(y, x) * 180 / Math.PI; if (t < 0) t += 360; return Math.round(t * 1e6) / 1e6; };
+      let a0 = cr > 0 ? ang(cx, cy) : ang(ax, ay); const a1 = a0 + 90; W.arc('TB-DETAIL', jx, jy, R, a0, a1 > 360 ? a1 - 360 : a1, { c: 1 });
+    };
+    /* 용접 지시 기호(필릿, 원본 크기) : tips = 화살촉 끝점들(복수 가능), (kx,ky) = 꺾임점, sg = 기준선이 뻗는 방향(+1 오른쪽, -1 왼쪽)
+       기준선 아래 직각삼각형(수직변 55.4 · 수평변 38.1) + 기준선 위 용접치수 문자(h50) */
+    D.weld = (tips, kx, ky, sg, o) => {
+      o = o || {}; const ref = o.ref || 116.4, leg = o.leg || 67.3, lh = 55.4, hy = 38.1, Lc = 'TB-LEADER';
+      tips.forEach(t => {
+        W.line(Lc, t[0], t[1], kx, ky, { c: 8 });
+        const dx = t[0] - kx, dy = t[1] - ky, hl = Math.hypot(dx, dy) || 1; D.arrow(Lc, t[0], t[1], dx / hl, dy / hl, 8, 20, 4.5);
+      });
+      W.line(Lc, kx, ky, kx + sg * ref, ky, { c: 8 });
+      if (o.tri !== false) { const lx = kx + sg * leg; W.poly(Lc, [[lx + sg * hy, ky], [lx, ky - lh], [lx, ky]], false, { c: 1 }); }
+      W.text('TB-TEXT', kx + (sg > 0 ? 13.2 : -47.4), ky + (o.below ? -72.4 : 10), TH, String(o.size || 5), { c: 2 });
+    };
+    /* 연속 치수 : items = [{p1,p2,val,text?,o?}] (축 방향 오름차순).  문자가 치수선 한쪽에서 서로 겹치거나 맞닿으면 반대쪽(가로: 위↔아래, 세로: 좌↔우)으로 보내 겹침을 없앤다.
+       사슬 양 끝의 좁은 칸은 먼저 반대쪽에 둔다(원본 관례) */
+    D.chain = (orient, items, def, o) => {
+      o = o || {}; const th = o.h || TH, n = items.length, gapT = 8;
+      const txt = it => String(it.text !== undefined ? it.text : fmtV(it.val));
+      const ax = orient === 'h' ? 0 : 1;
+      const span = it => Math.abs(it.p2[ax] - it.p1[ax]);
+      const cen = items.map(it => (it.o && (it.o.tx !== undefined ? it.o.tx : it.o.ty)) !== undefined ? (it.o.tx !== undefined ? it.o.tx : it.o.ty) : (it.p1[ax] + it.p2[ax]) / 2);
+      const hf = items.map(it => txt(it).length * th * 0.58 / 2);
+      const ends = [-Infinity, -Infinity], alt = new Array(n).fill(false), far = new Array(n).fill(false);
+      const order = items.map((it, i) => i).sort((a, b) => cen[a] - cen[b]), half = Math.ceil(n / 2);
+      order.slice(0, half).forEach((i, k) => {
+        const small = span(items[i]) < 2 * hf[i] + 10, endItem = (k === 0);
+        if (orient === 'v' && small && !endItem) { far[i] = true; return; }          // 세로 사슬 : 좁은 칸 문자는 바깥 열(원본 관례)
+        const pref = (endItem && small) ? 1 : 0;
+        let pick = [pref, 1 - pref].find(sd => cen[i] - hf[i] >= ends[sd] + gapT);
+        if (pick === undefined) pick = ends[0] <= ends[1] ? 0 : 1;
+        alt[i] = pick === 1; ends[pick] = cen[i] + hf[i];
+      });
+      order.slice(0, Math.floor(n / 2)).forEach((i, k) => { alt[order[n - 1 - k]] = alt[i]; far[order[n - 1 - k]] = far[i]; });   // 오른쪽(아래쪽)은 왼쪽(위쪽)과 대칭
+      items.forEach((it, i) => {
+        const oo = Object.assign({}, o.each || {}, it.o || {});
+        if (it.text !== undefined) oo.text = it.text;
+        if (orient === 'h') { if (alt[i] !== !!o.below) oo.below = true; else delete oo.below; }
+        else { const dflt = o.side || (def < it.p1[0] ? 'l' : 'r'); oo.side = alt[i] ? (dflt === 'l' ? 'r' : 'l') : dflt; if (far[i]) oo.far = 66; }
+        D.dim(orient, it.p1, it.p2, def, it.val, oo);
+      });
     };
     return D;
   }
@@ -3265,7 +3305,7 @@ d=(g[h++]|g[h++]<<8|g[h++]<<16|g[h++]<<24)>>>0;(a.length&4294967295)!==d&&n(Erro
     /* ---- 공통 : 폭 방향 눈금(웹 면) 목록 ---- */
     const faces = [0]; webs.forEach(w => { faces.push(w.x0, w.x1); }); faces.push(B);                         // 0, 웹면…, B
     const chainV = (ox, oy, x1, x2) => {                                                                      // 평면도 좌측 치수 : 폭 방향 나열 + 전체
-      for (let i = 0; i < faces.length - 1; i++) { const a = faces[i], b = faces[i + 1]; D.dim('v', [ox, oy + a], [ox, oy + b], ox + x1, b - a, (b - a) < 30 ? { far: 66 } : {}); }
+      D.chain('v', faces.slice(0, -1).map((a, i) => ({ p1: [ox, oy + a], p2: [ox, oy + faces[i + 1]], val: faces[i + 1] - a })), ox + x1, {});
       D.dim('v', [ox, oy], [ox, oy + B], ox + x2, B, {});
     };
     const webLines = (ox, oy) => webs.forEach(w => { Wr.line('TB-HBEAM', ox, oy + w.x0, ox + L, oy + w.x0, { c: 6 }); Wr.line('TB-HBEAM', ox, oy + w.x1, ox + L, oy + w.x1, { c: 6 }); });
@@ -3284,7 +3324,7 @@ d=(g[h++]|g[h++]<<8|g[h++]<<16|g[h++]<<24)>>>0;(a.length&4294967295)!==d&&n(Erro
       D.dim('h', [ox + 150, oy + B], [ox + L - 150, oy + B], oy + B + 258, L - 300, {});
       D.dim('h', [ox + L - 150, oy + B], [ox + L, oy + B], oy + B + 258, 150, { tx: ox + L - 75 });
       D.dim('h', [ox, oy + B], [ox + L, oy + B], oy + B + 388, L, {});
-      chainV(ox, oy, -150, -300);
+      chainV(ox, oy, -198, -376);
       // 인출선
       D.callout(ox + L - 420, oy + B, -62, 88, 2);
       Wr.poly('TB-LEADER', [[ox + 150, oy + B / 2 + hy], [ox + 227.2, oy + B + 76.5], [ox + 457.4, oy + B + 76.5]], false, { c: 1 });
@@ -3311,22 +3351,19 @@ d=(g[h++]|g[h++]<<8|g[h++]<<16|g[h++]<<24)>>>0;(a.length&4294967295)!==d&&n(Erro
       [supp - 5, L - supp + 5].forEach(hx => hys.forEach(y => { Wr.circle('TB-DETAIL', ox + hx, oy + y, 12, { c: 2 }); Wr.line('TB-DETAIL', ox + hx - 18, oy + y, ox + hx + 18, oy + y, { c: 2 }); Wr.line('TB-DETAIL', ox + hx, oy + y - 18, ox + hx, oy + y + 18, { c: 2 }); }));
       // 치수 : 상부
       const cs = [0].concat(dia, [L]);
-      for (let i = 0; i < cs.length - 1; i++) D.dim('h', [ox + cs[i], oy + B], [ox + cs[i + 1], oy + B], oy + B + 215, cs[i + 1] - cs[i], {});
+      D.chain('h', cs.slice(0, -1).map((a, i) => ({ p1: [ox + a, oy + B], p2: [ox + cs[i + 1], oy + B], val: cs[i + 1] - a })), oy + B + 215, {});
       const s1 = supp - padHalf, s2 = supp + padHalf;
-      D.dim('h', [ox, oy + B], [ox + s1, oy + B], oy + B + 334, s1, {});
-      D.dim('h', [ox + s1, oy + B], [ox + s2, oy + B], oy + B + 334, 2 * padHalf, {});
-      D.dim('h', [ox + s2, oy + B], [ox + L - s2, oy + B], oy + B + 334, L - 2 * s2, {});
-      D.dim('h', [ox + L - s2, oy + B], [ox + L - s1, oy + B], oy + B + 334, 2 * padHalf, {});
-      D.dim('h', [ox + L - s1, oy + B], [ox + L, oy + B], oy + B + 334, s1, {});
-      D.dim('h', [ox, oy + B], [ox + L, oy + B], oy + B + 491, L, {});
-      chainV(ox, oy, -150, -300);
+      const pxs = [0, s1, s2, L - s2, L - s1, L];
+      D.chain('h', pxs.slice(0, -1).map((a, i) => ({ p1: [ox + a, oy + B], p2: [ox + pxs[i + 1], oy + B], val: pxs[i + 1] - a })), oy + B + 385, {});
+      D.dim('h', [ox, oy + B], [ox + L, oy + B], oy + B + 540, L, {});
+      chainV(ox, oy, -198, -376);
       if (hys.length >= 2) D.dim('v', [ox + supp - 5 + 12, oy + hys[hys.length - 2]], [ox + supp - 5 + 12, oy + hys[hys.length - 1]], ox + 316, hys[hys.length - 1] - hys[hys.length - 2], { side: 'r' });
       // 단면 절단선 A / B / C
       [[xA, 'A'], [xB, 'B'], [xC, 'C']].forEach(c => {
-        const yt = oy + B + 60, yb = oy - 100;
+        const yt = oy + B + 94.9, yb = oy - 133.3;                               // 원본 : 절단선 끝에서 수평 64.1 → 삼각 화살촉(길이 35.7, 폭 48.2)
         Wr.line('TB-SECTMARK', ox + c[0], yb, ox + c[0], yt, { c: 1 });
-        [yt, yb].forEach(y => { Wr.line('TB-SECTMARK', ox + c[0], y, ox + c[0] + 80, y, { c: 1 }); D.arrow('TB-SECTMARK', ox + c[0] + 80, y, 1, 0); });
-        Wr.text(T, ox + c[0] + 118, yt + 14, 50, c[1], { c: 7 }); Wr.text(T, ox + c[0] + 118, yb - 62, 50, c[1], { c: 7 });
+        [yt, yb].forEach(y => { Wr.line('TB-SECTMARK', ox + c[0], y, ox + c[0] + 64.1, y, { c: 1 }); D.arrow('TB-SECTMARK', ox + c[0] + 99.8, y, 1, 0, 1, 35.7, 24.1); });
+        Wr.text(T, ox + c[0] + 118.6, yt - 21.2, 50, c[1], { c: 2 }); Wr.text(T, ox + c[0] + 118.6, oy - 162, 50, c[1], { c: 2 });
       });
       // 번호
       rowsCx('M').forEach(o => D.callout(ox + 640, oy + o.cy, 40, 0, 1));
@@ -3354,16 +3391,12 @@ d=(g[h++]|g[h++]<<8|g[h++]<<16|g[h++]<<24)>>>0;(a.length&4294967295)!==d&&n(Erro
       });
       // 치수
       const cs = [0].concat(dia, [L]);
-      for (let i = 0; i < cs.length - 1; i++) D.dim('h', [ox + cs[i], oy + td], [ox + cs[i + 1], oy + td], oy + td + 264.3, cs[i + 1] - cs[i], {});
+      D.chain('h', cs.slice(0, -1).map((a, i) => ({ p1: [ox + a, oy + td], p2: [ox + cs[i + 1], oy + td], val: cs[i + 1] - a })), oy + td + 264.3, {});
       D.dim('h', [ox, oy + td], [ox + L, oy + td], oy + td + 369.7, L, {});
       const by = oy + hb - G.legH - 239.5, s1 = supp - padHalf, s2 = supp + padHalf;
-      D.dim('h', [ox, oy + hb - padT], [ox + s1, oy + hb - padT], by, s1, {});
-      D.dim('h', [ox + s1, oy + hb - padT], [ox + s2 - padT, oy + hb - padT], by, 2 * padHalf - padT, {});
-      D.dim('h', [ox + s2 - padT, oy + hb - padT], [ox + s2, oy + hb - padT], by, padT, { below: true });
-      D.dim('h', [ox + s2, oy + hb - padT], [ox + L - s2, oy + hb - padT], by, L - 2 * s2, {});
-      D.dim('h', [ox + L - s2, oy + hb - padT], [ox + L - s2 + padT, oy + hb - padT], by, padT, { below: true });
-      D.dim('h', [ox + L - s2 + padT, oy + hb - padT], [ox + L - s1, oy + hb - padT], by, 2 * padHalf - padT, {});
-      D.dim('h', [ox + L - s1, oy + hb - padT], [ox + L, oy + hb - padT], by, s1, {});
+      const yb = oy + hb - padT, bxs = [0, s1, s2 - padT, s2, L - s2, L - s2 + padT, L - s1, L];
+      D.chain('h', bxs.slice(0, -1).map((a, i) => ({ p1: [ox + a, yb], p2: [ox + bxs[i + 1], yb], val: bxs[i + 1] - a })), by, {});
+      D.dim('h', [ox, yb], [ox + L, yb], by - 125, L, {});
       D.dim('v', [ox + L, oy + 0], [ox + L, oy - posM], ox + L + 88, posM, { side: 'l' });
       D.dim('v', [ox + L, oy - posM], [ox + L, oy + hb], ox + L + 88, hw - posM, { side: 'r' });
       D.dim('v', [ox + L, oy], [ox + L, oy + hb], ox + L + 253, hw, { side: 'l' });
@@ -3401,35 +3434,62 @@ d=(g[h++]|g[h++]<<8|g[h++]<<16|g[h++]<<24)>>>0;(a.length&4294967295)!==d&&n(Erro
       const Lb = bays.filter(b => b.t === 'L');
       Lb.forEach(b => {
         Wr.poly('TB-LPLATE', [[X(b.x0), Y(lpY0)], [X(b.x1), Y(lpY0)], [X(b.x1), Y(lpY1)], [X(b.x0), Y(lpY1)]], true, { c: 4 });
-        const wsz = Math.min(5, tL);
-        Wr.hatch('TB-DETAIL', [[[X(b.x0), Y(lpY0)], [X(b.x0), Y(lpY0 - wsz)], [X(b.x0 + wsz), Y(lpY0)]]], 'SOLID', 1, 0, { c: 1 });
-        Wr.hatch('TB-DETAIL', [[[X(b.x1), Y(lpY0)], [X(b.x1), Y(lpY0 - wsz)], [X(b.x1 - wsz), Y(lpY0)]]], 'SOLID', 1, 0, { c: 1 });
-        Wr.arc('TB-DETAIL', X(b.x0), Y(lpY0), wsz * S, 270, 360, { c: 1 }); Wr.arc('TB-DETAIL', X(b.x1), Y(lpY0), wsz * S, 180, 270, { c: 1 });
-        if (hasDia) {                                                          // 격벽 단면 (모따기 15)
-          const ch = Math.min(15, yh / 2, (b.x1 - b.x0) / 4);
-          const q = [[X(b.x0), Y(-ch)], [X(b.x0 + ch), Y(0)], [X(b.x1 - ch), Y(0)], [X(b.x1), Y(-ch)], [X(b.x1), Y(-yh)], [X(b.x0), Y(-yh)]];
+        if (hasDia) {                                                          // 격벽 단면 (상단 모서리 R15 스캘럽 — 원본과 동일하게 원호)
+          const ch = Math.min(15, yh / 2, (b.x1 - b.x0) / 4), bg = 0.41421356237;
+          const q = [[X(b.x0), Y(-ch), bg], [X(b.x0 + ch), Y(0)], [X(b.x1 - ch), Y(0), bg], [X(b.x1), Y(-ch)], [X(b.x1), Y(-yh)], [X(b.x0), Y(-yh)]];
           Wr.hatch('TB-HATCH', [q], 'ANSI31', 15, 0, { c: 7 }); Wr.poly('TB-DIAPH', q, true, { c: 4 });
         }
       });
+      /* ---- 용접부 : 1/4 원호 비드 + 용접 지시 기호 (원본 CZ-LEAD 크기) ---- */
+      const wT = Math.min(5, tw) * S, wB = Math.min(5, tL) * S, yTop = Y(0), yWb = Y(-hw), wL = webs[0].x0, wR = webs[webs.length - 1].x1;
+      // (1) 무늬강판 하면 ~ 웨브 : 바깥 웨브 외측면 2곳 + L 격간 양쪽 모서리
+      D.sector(X(wL), yTop, 0, -1, -1, 0, wT); D.sector(X(wR), yTop, 0, -1, 1, 0, wT);
+      D.weld([[X(wL) - 6.8, yTop - 7.7]], X(wL) - 52.8, yTop - 81.6, -1);
+      D.weld([[X(wR) + 6.8, yTop - 7.7]], X(wR) + 52.8, yTop - 81.6, 1);
+      Lb.forEach(b => {
+        D.sector(X(b.x0), yTop, 0, -1, 1, 0, wT); D.sector(X(b.x1), yTop, 0, -1, -1, 0, wT);
+        D.weld([[X(b.x0) + 6.9, yTop - 0.9]], X(b.x0) + 53, yTop + 72.8, 1, { ref: 98.9, leg: 49.7 });
+        D.weld([[X(b.x1) - 6.9, yTop - 0.9]], X(b.x1) - 53, yTop + 72.8, -1, { ref: 98.9, leg: 49.7 });
+      });
+      // (2) 하부 철판 모서리 (격벽 단면에서는 생략, 스토퍼 단면에서는 웨브 하단 용접과 지시 기호 공용)
+      if (!hasDia || hasStop) {
+        Lb.forEach(b => {
+          D.sector(X(b.x0), Y(lpY0), 0, -1, 1, 0, wB); D.sector(X(b.x1), Y(lpY0), 0, -1, -1, 0, wB);
+          const iL = bays.indexOf(b), wl = webs[iL], wr = webs[iL + 1];
+          if (!hasStop) {
+            D.weld([[X(b.x0) + 5.1, Y(lpY0) - 6.7]], X(b.x0) + 51.1, Y(lpY0) + 90, 1);
+            D.weld([[X(b.x1) - 5.1, Y(lpY0) - 6.7]], X(b.x1) - 51.1, Y(lpY0) + 90, -1);
+          } else {
+            D.sector(X(wl.x0), yWb, 0, 1, -1, 0, wT); D.sector(X(wr.x1), yWb, 0, 1, 1, 0, wT);
+            D.weld([[X(b.x0) + 6.4, Y(lpY0) - 6.7], [X(wl.x0) - 6.8, yWb + 7.6]], X(b.x0) - 88.4, Y(lpY0) + 42.3, -1);
+            D.weld([[X(b.x1) - 6.4, Y(lpY0) - 6.7], [X(wr.x1) + 6.8, yWb + 7.6]], X(b.x1) + 88.4, Y(lpY0) + 42.3, 1);
+          }
+        });
+        if (hasStop) {                                                            // 바깥 웨브 하단 ↔ 스토퍼
+          D.sector(X(wL), yWb, 0, 1, -1, 0, wT); D.sector(X(wR), yWb, 0, 1, 1, 0, wT);
+          D.weld([[X(wL) - 6.8, yWb + 7.6]], X(wL) - 52.8, yWb + 81.5, -1);
+          D.weld([[X(wR) + 6.8, yWb + 7.6]], X(wR) + 52.8, yWb + 81.5, 1);
+        }
+      }
       if (hasStop) { D.rect('TB-STOPPER', X(0), Y(-hw), X(B), Y(-hw - G.legH), { c: 3 }); Wr.line('TB-STOPPER', X(0), Y(-hw - padT), X(B), Y(-hw - padT), { c: 3 }); }
       // 치수 : 상부 (웹 배치 나열 + 전체)
       const dyc = oy + S * td + 207, dyo = oy + S * td + 369;
-      for (let i = 0; i < faces.length - 1; i++) D.dim('h', [X(faces[i]), Y(td)], [X(faces[i + 1]), Y(td)], dyc, faces[i + 1] - faces[i], {});
+      D.chain('h', faces.slice(0, -1).map((a, i) => ({ p1: [X(a), Y(td)], p2: [X(faces[i + 1]), Y(td)], val: faces[i + 1] - a })), dyc, {});
       D.dim('h', [X(0), Y(td)], [X(B), Y(td)], dyo, B, {});
       // 치수 : 우측
-      const rx = X(B), c1 = rx + 60, c2 = c1 + 90, c3 = c2 + 90, tot = td + hw + (hasStop ? G.legH : 0);
+      const rx = X(B), c1 = rx + 200, c2 = c1 + 95, c3 = c2 + 95, tot = td + hw + (hasStop ? G.legH : 0);
+      D.dim('v', [X(B), Y(td)], [X(B), Y(0)], c1, td, { side: 'l' });
       D.dim('v', [X(B), Y(0)], [X(B), Y(-posM)], c1, posM, { side: 'l' });
       D.dim('v', [X(B), Y(-posM)], [X(B), Y(-hw)], c1, hw - posM, { side: 'r' });
-      if (hasStop) D.dim('v', [X(B), Y(-hw)], [X(B), Y(-hw - G.legH)], c1, G.legH, { side: 'r' });
+      D.dim('v', [X(B), Y(td)], [X(B), Y(0)], c2, td, { side: 'l' });
       D.dim('v', [X(B), Y(0)], [X(B), Y(-hw)], c2, hw, { side: 'l' });
+      if (hasStop) D.dim('v', [X(B), Y(-hw)], [X(B), Y(-hw - G.legH)], c2, G.legH, { side: 'l' });
       D.dim('v', [X(B), Y(td)], [X(B), Y(-hw - (hasStop ? G.legH : 0))], c3, tot, { side: 'l' });
       // 번호 · 용접 기호
       D.callout(X(B * 0.5) + 15, Y(td), -60, 80, 2);
-      D.weld(X(webs[0].c), Y(td), -40, 50, 5); D.weld(X(webs[webs.length - 1].c), Y(td), 40, 50, 5);
       for (let k = 0; k * 2 + 1 < webs.length; k++) { const cx = X((webs[2 * k].x1 + webs[2 * k + 1].x0) / 2), ft = -posM + tM / 2; D.callout(cx - 20, Y(ft), -60, 70, 1); }
       Lb.forEach(b => {
         const cx = X((b.x0 + b.x1) / 2);
-        if (!hasStop) { D.weld(X(b.x0) + 6, Y(lpY0) - 6, -40, -60, 5); D.weld(X(b.x1) - 6, Y(lpY0) - 6, 40, -60, 5); }
         D.callout(cx - 40, Y(lpY0), -20, hasStop ? -240 : -90, 4);
         if (hasDia) { Wr.circle('TB-BALLOON', cx, Y(-yh / 2) + 40, 40.2, { c: 4 }); Wr.text(T, cx, Y(-yh / 2) + 22, 50, '5', { ha: 'c', c: 2 }); Wr.poly('TB-LEADER', [[cx + 28, Y(-yh / 2) + 12], [cx + 70, Y(-yh / 2) - 40]], false, { c: 1 }); D.arrow('TB-LEADER', cx + 70, Y(-yh / 2) - 40, 0.6, -0.8); }
       });
@@ -3449,15 +3509,14 @@ d=(g[h++]|g[h++]<<8|g[h++]<<16|g[h++]<<24)>>>0;(a.length&4294967295)!==d&&n(Erro
       Wr.line('TB-HBEAM', ax, ay, ax, ay + 359, { c: 6 }); Wr.line('TB-HBEAM', ax - tw10, ay, ax - tw10, ay + 324, { c: 6 }); Wr.line('TB-HBEAM', ax - tw10, ay, ax, ay, { c: 6 });
       Wr.line('TB-LPLATE', ax, pb, ax + 625.2, pb, { c: 4 }); Wr.line('TB-LPLATE', ax, pt, ax + 628.8, pt, { c: 4 });
       const w = Math.min(tL, 5) * k;
-      Wr.hatch('TB-DETAIL', [[[ax, pb], [ax, pb - w], [ax + w, pb]]], 'SOLID', 1, 0, { c: 1 });
-      Wr.arc('TB-DETAIL', ax, pb, w, 270, 360, { c: 1 });
+      D.sector(ax, pb, 0, -1, 1, 0, w);
       Wr.ellipse('TB-DETAIL', 7512.7 + RX, 4075.3, -395.2, 0, 0.803, 0, Math.PI * 2, { c: 1 });
       D.dim('v', [7375.5 + RX, pb], [7375.5 + RX, ay], 7577.8 + RX, raiseL, { side: 'l' });
       D.dim('v', [7445.8 + RX, pb], [7445.8 + RX, pt], 7648.1 + RX, tL, { side: 'r' });
       D.dim('h', [ax - tw10, 4399.3], [ax, 4399.3], 4485.6, tw, { tx: ax - tw10 / 2 });
       D.callout(7259.4 + RX, 4220.5, 162.4, 266.7, 1);
       D.callout(7498.5 + RX, 4072.3, 125.1, 179.1, 4);
-      D.weld(ax, pb, -114.1, 95.9, 5);
+      D.weld([[ax, pb]], ax - 114.1, pb + 95.9, -1, { ref: 118.8, tri: false, below: true });
       Wr.text('TB-TITLE', 7512.7 + RX, 4620.5, 60, '상세"A"', { ha: 'c' });
     })();
     // --- 상세 "B" (4배) : 스토퍼 ---
@@ -4426,7 +4485,7 @@ const OCRR = (function () {
           const pt = [num(pre + '.P2D', '하중 크기 P', { unit: 'kN' })], udl = [];
           pt.forEach(e => { e.style.gridColumn = '1'; });
           const pairU = pairFld('하중 재하 길이 × 폭', pre + '.pa', pre + '.pb', 'm');
-          const pairP = pairFld('하중 재하 길이 × 폭 (for 3D Analysis)', pre + '.ta', pre + '.tb', 'm');
+          const pairP = pairFld('하중 재하 길이 × 폭 (3D 해석)', pre + '.ta', pre + '.tb', 'm');
           pairP.title = '집중하중은 2D 구조계산에서 점하중(경간 중앙)으로 계산하고, 이 재하 길이 × 폭은 3D 해석(MIDAS 면압 재하)에만 적용합니다';
           const item = () => getp(S.inp, pre);
           const sync = () => {
