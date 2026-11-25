@@ -672,6 +672,7 @@ d=(g[h++]|g[h++]<<8|g[h++]<<16|g[h++]<<24)>>>0;(a.length&4294967295)!==d&&n(Erro
       mct: {
         supp: 109, padHalf: 55, nDivs: [],
         swFactor: 1.05,
+        plateSub: 1, plateSubV: 2,   // 판요소 종류(MCT iSUB) : 1 = Thick (without Drilling DOF, 기본) · 3 = Thick (with Drilling DOF)
         diaph: true, diaN: 3, diaD: [], diaT: 5,      // 격벽 : 개수(2 / 3 / 5 / 7) · 지점~중앙 구간 길이 수정값(mm, 비우면 자동) / 두께 (mm)
         // 하중 재하 위치 : 케이스마다 하중 종류(DB = 표준트럭하중, PSM = 추가하중 idx 번째 세트)와 재하 중심 x, y (mm)
         //   DB : type 1 = 접지 긴 변이 x 방향(차량 직교), 2 = y 방향(차량 평행) / TC = 트럭 크레인 지지패널 (L = x, B = y) / show = 평면도 표시
@@ -1290,9 +1291,10 @@ d=(g[h++]|g[h++]<<8|g[h++]<<16|g[h++]<<24)>>>0;(a.length&4294967295)!==d&&n(Erro
     w('*NODE    ; Nodes'); w('; iNO, X, Y, Z');
     M.nodes.forEach(n => w(String(n.id).padStart(6) + ', ' + kfix(n.x) + ', ' + kfix(n.y) + ', ' + kfix(n.z)));
     w('');
+    const subCode = +m.plateSub === 3 ? 3 : 1;   // iSUB : 1 = Thick (without Drilling DOF) · 3 = Thick (with Drilling DOF)
     w('*ELEMENT    ; Elements');
-    w('; iEL, TYPE, iMAT, iPRO, iN1, iN2, iN3, iN4, iSUB, iWID , LCAXIS    ; Planar Element');
-    M.elems.forEach(e => w(String(e.id).padStart(6) + ', PLATE , ' + String(e.mat).padStart(4) + ', ' + String(e.thk).padStart(5) + ', ' + e.n.map(v => String(v).padStart(6)).join(', ') + ',     1,     0'));
+    w('; iEL, TYPE, iMAT, iPRO, iN1, iN2, iN3, iN4, iSUB, iWID , LCAXIS    ; Planar Element (iSUB 1 = Thick without Drilling DOF, 3 = Thick with Drilling DOF)');
+    M.elems.forEach(e => w(String(e.id).padStart(6) + ', PLATE , ' + String(e.mat).padStart(4) + ', ' + String(e.thk).padStart(5) + ', ' + e.n.map(v => String(v).padStart(6)).join(', ') + ',     ' + subCode + ',     0'));
     w('');
     const groupBlock = () => {
       if (!m.groups) return;
@@ -2253,14 +2255,14 @@ d=(g[h++]|g[h++]<<8|g[h++]<<16|g[h++]<<24)>>>0;(a.length&4294967295)!==d&&n(Erro
     h1('3. 3D 구조해석');
     h2('3.1 단면제원 및 모델링');
     p('해석 프로그램 : MIDAS Civil  (판요소 모델, 단위 N·mm).  부재별 두께와 요소 구성은 아래와 같다.');
-    const mt = inp.mct;
+    const mt = inp.mct, pt = 'Plate (Thick' + (+mt.plateSub === 3 ? ', with Drilling DOF)' : ', without Drilling DOF)');
     tbl(['부재', '요소 종류', '두께 (mm)', '강종', '요소수'], [
-      ['무늬강판 (DECK)', 'Plate (Thick)', f(s.td * 10, 1) + '  (offset +' + f(s.td * 5, 2) + ')', m.deckGrade, f(M.groups.DECK.length, 0)],
-      ['Web (WEB)', 'Plate (Thick)', f(s.tw * 10, 1), m.bhGrade, f(M.groups.WEB.length, 0)],
-      ['중간 플랜지 (MFLG)', 'Plate (Thick)', f(s.tM * 10, 1), m.bhGrade, f(M.groups.MFLG.length, 0)],
-      ['하부 플랜지 (LFLG)', 'Plate (Thick)', f(s.tL * 10, 1) + '  (offset -' + f(s.tL * 5, 2) + ')', (m.lfGrade || m.bhGrade), f(M.groups.LFLG.length, 0)],
-      ['격벽 (DIAPH)', 'Plate (Thick)', f(E.diaT(inp), 1), '-', f(M.groups.DIAPH.length, 0)],
-      ['받침판', 'Plate (Thick)', f(mt.padT, 1) + '  (offset -' + f(mt.padT / 2, 2) + ')', m.bhGrade, f(M.groups.PAD.length, 0)]
+      ['무늬강판 (DECK)', pt, f(s.td * 10, 1) + '  (offset +' + f(s.td * 5, 2) + ')', m.deckGrade, f(M.groups.DECK.length, 0)],
+      ['Web (WEB)', pt, f(s.tw * 10, 1), m.bhGrade, f(M.groups.WEB.length, 0)],
+      ['중간 플랜지 (MFLG)', pt, f(s.tM * 10, 1), m.bhGrade, f(M.groups.MFLG.length, 0)],
+      ['하부 플랜지 (LFLG)', pt, f(s.tL * 10, 1) + '  (offset -' + f(s.tL * 5, 2) + ')', (m.lfGrade || m.bhGrade), f(M.groups.LFLG.length, 0)],
+      ['격벽 (DIAPH)', pt, f(E.diaT(inp), 1), '-', f(M.groups.DIAPH.length, 0)],
+      ['받침판', pt, f(mt.padT, 1) + '  (offset -' + f(mt.padT / 2, 2) + ')', m.bhGrade, f(M.groups.PAD.length, 0)]
     ], { widths: [26, 20, 15.84, 24.84, 12], align: 'lcccr' });
     eq('모델 규모 : 절점 ' + f(M.nodes.length, 0) + '개 ,  요소 ' + f(M.elems.length, 0) + '개  (L = ' + f(M.L, 0) + ' mm ,  B = ' + f(M.W, 0) + ' mm ,  H = ' + f(s.hw * 10, 0) + ' mm)',
       '경계조건 : 지점 x = ' + f(mt.supp, 0) + ' mm (Dx, Dy, Dz 구속) ,  x = ' + f(M.L - mt.supp, 0) + ' mm (Dy, Dz 구속) ,  받침판 하면 절점',
@@ -3720,7 +3722,33 @@ s2:"data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAQDAwMDAgQDAwMEBAQFB
     ['mct', '3. 3D 모델 · MCT 파일 만들기', () => `
       <p>MIDAS Civil에 불러올 해석 모델(<code>.mct</code>)을 만드는 단계입니다. 단면 제원은 1번 탭 값을 그대로 쓰므로 여기서는 <b>해석 전용 설정</b>만 입력합니다.</p>
       <h4>1) MIDAS 모델 설정</h4>
-      <p>지점 위치(단부~지점), 받침판 반폭·두께, 격벽 개수·두께, 자중 계수(5 % 할증 = 1.05) 등을 입력합니다. 입력란에 커서를 두면 그림에서 해당 치수가 강조되고, 격벽 간격은 그림 위의 숫자를 직접 고칠 수도 있습니다(직접 고친 값은 고정되고 나머지는 자동 배분).</p>
+      <p>지점 위치(단부~지점), 받침판 반폭·두께, 격벽 개수·두께, 자중 계수(5 % 할증 = 1.05) 등을 입력합니다. <b>With Drilling DOF</b>는 기본이 체크 해제(Thick, without Drilling DOF, MCT iSUB = 1)이며, 체크하면 법선방향 회전 자유도를 고려하는 Thick (with Drilling DOF, iSUB = 3)로 내보냅니다. 같은 모델에서 with Drilling DOF는 받침 부근 웹 응력을 더 크게 계산하므로, MIDAS에서 요소 종류를 직접 바꾸지 않아도 됩니다. 입력란에 커서를 두면 그림에서 해당 치수가 <b style="color:#c0392b">빨강</b>으로 강조됩니다.</p>
+      <h4>1) 계산서 표지 입력</h4>
+      <p>표지 제목, 부제, 프로젝트, 일자, 건설회사, 작성기관 등 계산서 첫 장에 들어갈 문구입니다.</p>
+      <h4>2) 단면 제원</h4>
+      <p>복공판 폭 B, 길이(경간) L, 무늬강판 두께 td, BH-형강 높이·Web 두께·순간격, 중간·하부 플랜지 두께 등을 <b>cm</b> 단위로 입력합니다. 중간플랜지는 한쪽에 둘 수 있으며 hw1(Web 상단~중간플랜지 중심)만 넣으면 hw2는 자동 계산됩니다. 입력한 값은 단면 그림, 2D 계산, MCT 모델, 도면에 모두 그대로 쓰입니다.</p>
+      <h4>3) 재료 · 허용응력</h4>
+      <p>무늬강판·BH-형강·하부플랜지·격벽의 강종을 각각 고르면, KDS 24 14 30 표 4.2-1의 기본허용응력에 <b>할증계수</b>와 <b>재사용 감소계수</b>가 곱해져 허용응력이 자동으로 정해집니다. 판 두께 구분은 부재 두께에 맞춰 자동 선택됩니다. 재사용 강재 여부와 Von-Mises 검토 할증의 적용 여부도 여기서 지정합니다.</p>
+      <h4>4) 설계하중</h4>
+      <ul class="mn-ul">
+        <li><b>충격계수, 허용처짐(L / ○○○), 부가하중</b> : 기준에 맞는 값이 기본으로 들어 있습니다.</li>
+        <li><b>작업하중</b> : 덤프트럭, 레미콘, 크롤러 크레인, 트럭 크레인 중 검토할 것만 체크합니다. 총중량 W와 재하계수를 넣고, 크레인은 궤도면적(a × b) 또는 아웃트리거 지지패널(B × L)을 입력하면 안내 그림이 입력값에 맞춰 바뀝니다. 『가설 구조물의 해설』 작업하중 참고표도 이 항목에서 열어 볼 수 있습니다.</li>
+        <li><b>표준트럭하중 (KL-510)</b> : 총중량·재하계수·접지면 크기를 입력합니다.</li>
+        <li><b>추가하중</b> : 위 목록에 없는 하중을 이름·형태·크기·<b>하중 재하 길이 × 폭 (3D 해석)</b>·재하계수로 직접 정의합니다. 버튼으로 여러 세트를 추가할 수 있습니다.</li>
+      </ul>
+      ${tip('체크를 해제한 하중은 2D 계산, 3D 하중 재하, 계산서 모두에서 빠집니다.')}`],
+
+    ['twod', '2. 2D 구조계산', () => `
+      <p>입력이 끝나면 별도 버튼 없이 자동으로 계산되며, 이 탭에서는 <b>결과만 확인</b>합니다. 위쪽 요약 카드에 <b>휨응력 · 전단응력 · 최대처짐</b>의 안전율과 <b>2D 종합</b> 판정(O.K / N.G)이 표시되고, 아래에는 계산서에 실릴 계산 과정이 수식과 표로 그대로 나옵니다.</p>
+      <ul class="mn-ul">
+        <li>N.G(붉은색)가 나오면 1번 탭의 단면 제원·강종·하중을 조정한 뒤 다시 확인합니다.</li>
+        <li>계산 과정의 숫자는 1번 탭 입력값과 항상 연동되므로 이 탭에서 직접 고치지 않습니다.</li>
+      </ul>`],
+
+    ['mct', '3. 3D 모델 · MCT 파일 만들기', () => `
+      <p>MIDAS Civil에 불러올 해석 모델(<code>.mct</code>)을 만드는 단계입니다. 단면 제원은 1번 탭 값을 그대로 쓰므로 여기서는 <b>해석 전용 설정</b>만 입력합니다.</p>
+      <h4>1) MIDAS 모델 설정</h4>
+      <p>지점 위치(단부~지점), 받침판 반폭·두께, 격벽 개수·두께, 자중 계수(5 % 할증 = 1.05) 등을 입력합니다. <b>판요소 종류</b>는 기본이 <b>Thick (with Drilling DOF)</b>(법선방향 회전 자유도 고려, MCT iSUB = 3)이며, 필요하면 <b>Thick (without Drilling DOF)</b>(iSUB = 1)로 바꿀 수 있습니다. 같은 모델에서 with Drilling DOF는 받침 부근 웹 응력을 더 크게 계산하므로, MIDAS에서 요소 종류를 직접 바꾸지 않아도 됩니다. 입력란에 커서를 두면 그림에서 해당 치수가 강조되고, 격벽 간격은 그림 위의 숫자를 직접 고칠 수도 있습니다(직접 고친 값은 고정되고 나머지는 자동 배분).</p>
       <h4>2) 모델 요약 · 검증</h4>
       <p>해석모델 단면(y-z), 평면(x-y), <b>3D 형상·하중 재하</b> 그림으로 모델이 의도대로 만들어졌는지 확인합니다.</p>
       <h4>3) 하중 재하</h4>
@@ -4511,7 +4539,7 @@ const OCRR = (function () {
   const renumberCases = inp => { try { const m = inp && inp.mct; if (!m || !m.cases) return inp;
       m.cases.forEach(c => { if (c.show === undefined) c.show = true; });
       if (!m.relPos) { const X0 = (inp.sec && inp.sec.L ? inp.sec.L : 199) * 5, Y0 = (inp.sec && inp.sec.B ? inp.sec.B : 99.4) * 5; m.cases.forEach(c => { c.cx = Math.round((c.cx - X0) * 100) / 100; c.cy = Math.round((c.cy - Y0) * 100) / 100; }); m.relPos = true; } } catch (e) { /* 무시 */ } return inp; };
-  const legacy = inp => { migrateCases(inp); renumberCases(inp); autoNameCases(inp); try { { const mt = inp && inp.mat; if (mt) { if (!mt.lfGrade) mt.lfGrade = mt.bhGrade; if (!mt.diaGrade || mt.diaGradeV !== 2) mt.diaGrade = 'SS275W'; mt.diaGradeV = 2; } if (inp && inp.mct) { inp.mct.crane = true; inp.mct.groups = true; { const og = { 'u-db11': 1, 'u-db21': 2, 'u-tc11': 3, 'u-cr11': 3 }, rs = Array.isArray(inp.mct.lcb) ? inp.mct.lcb.filter(r => og[r.src]) : []; if (rs.length && rs.every(r => r.gu === undefined || r.gu === og[r.src])) rs.forEach(r => { delete r.gu; }); }   /* 예전 기본 ENV 묶음(1·2·3·3)이 저장돼 있으면 새 기본(KL-510 = ENV1, 크레인류 = ENV2)으로 */ inp.mct.diaph = true; inp.mct.diaN = [2, 3, 5, 7].includes(+inp.mct.diaN) ? +inp.mct.diaN : 3; if (!Array.isArray(inp.mct.diaD)) inp.mct.diaD = []; if (!Array.isArray(inp.mct.nDivs)) inp.mct.nDivs = inp.mct.nMid > 0 ? [Math.round(inp.mct.nMid)] : []; } } const r3 = inp && inp.res3d; if (r3 && r3.bhGroups && !r3.bhV2) { r3.bhGroups.DIAPH = false; r3.bhV2 = 1; }   /* BH-형강 범위에서 격벽(SS275W) 제외 → 허용응력이 BH 강종(SM355) 기준으로 */ if (r3 && Array.isArray(r3.combos)) { const mp = id => /^C[1-4]$/.test(String(id)) ? 'ENV' + String(id).slice(1) : id; r3.combos.forEach(c => { c.id = mp(c.id); if (c.mctName) c.mctName = mp(c.mctName); }); if (r3.data) { const nd = {}; Object.keys(r3.data).forEach(k => { nd[mp(k)] = r3.data[k]; }); r3.data = nd; } } const w = inp && inp.loads && inp.loads.work; if (w) w.use = false;   // 크레인 작업하중(엑셀 1.2) 항목은 삭제됨
+  const legacy = inp => { migrateCases(inp); if (inp && inp.mct && inp.mct.plateSubV !== 2) { inp.mct.plateSub = 1; inp.mct.plateSubV = 2; }   /* 판요소 종류 : 체크 해제(without Drilling DOF)가 기본 */  renumberCases(inp); autoNameCases(inp); try { { const mt = inp && inp.mat; if (mt) { if (!mt.lfGrade) mt.lfGrade = mt.bhGrade; if (!mt.diaGrade || mt.diaGradeV !== 2) mt.diaGrade = 'SS275W'; mt.diaGradeV = 2; } if (inp && inp.mct) { inp.mct.crane = true; inp.mct.groups = true; { const og = { 'u-db11': 1, 'u-db21': 2, 'u-tc11': 3, 'u-cr11': 3 }, rs = Array.isArray(inp.mct.lcb) ? inp.mct.lcb.filter(r => og[r.src]) : []; if (rs.length && rs.every(r => r.gu === undefined || r.gu === og[r.src])) rs.forEach(r => { delete r.gu; }); }   /* 예전 기본 ENV 묶음(1·2·3·3)이 저장돼 있으면 새 기본(KL-510 = ENV1, 크레인류 = ENV2)으로 */ inp.mct.diaph = true; inp.mct.diaN = [2, 3, 5, 7].includes(+inp.mct.diaN) ? +inp.mct.diaN : 3; if (!Array.isArray(inp.mct.diaD)) inp.mct.diaD = []; if (!Array.isArray(inp.mct.nDivs)) inp.mct.nDivs = inp.mct.nMid > 0 ? [Math.round(inp.mct.nMid)] : []; } } const r3 = inp && inp.res3d; if (r3 && r3.bhGroups && !r3.bhV2) { r3.bhGroups.DIAPH = false; r3.bhV2 = 1; }   /* BH-형강 범위에서 격벽(SS275W) 제외 → 허용응력이 BH 강종(SM355) 기준으로 */ if (r3 && Array.isArray(r3.combos)) { const mp = id => /^C[1-4]$/.test(String(id)) ? 'ENV' + String(id).slice(1) : id; r3.combos.forEach(c => { c.id = mp(c.id); if (c.mctName) c.mctName = mp(c.mctName); }); if (r3.data) { const nd = {}; Object.keys(r3.data).forEach(k => { nd[mp(k)] = r3.data[k]; }); r3.data = nd; } } const w = inp && inp.loads && inp.loads.work; if (w) w.use = false;   // 크레인 작업하중(엑셀 1.2) 항목은 삭제됨
        if (w && w.use === undefined && w.incl2D !== undefined) w.use = !!w.incl2D; const ps = inp && inp.loads && [inp.loads.psm].concat(inp.loads.psmX || []);   // 추가하중 : 등분포 q(kN/m) → 하중 크기 P(kN) = q × 재하길이
        if (ps) ps.forEach(it => { if (it && it.q2D !== undefined) { if (it.type !== '집중하중') { const pa = it.pa !== undefined ? it.pa : 0.72; it.P2D = Math.round(it.q2D * pa * 1e6) / 1e6; } delete it.q2D; } });
        const c = inp && inp.loads && inp.loads.crawler; if (c && c.area !== undefined && c.a === undefined) { c.b = 0.6; c.a = c.area / 0.6; } } catch (e) { /* 무시 */ } return inp; };
@@ -5000,6 +5028,11 @@ const OCRR = (function () {
     s.addEventListener('change', () => { S.inp.mct.diaN = parseInt(s.value, 10); S.inp.mct.diaD = []; S.inp.mct.nDivs = []; changed(true); });
     return h('label', { class: 'fld' }, h('span', { class: 'lb', text: '격벽 개수' }), h('span', { class: 'iw' }, s));
   }
+  function plateSubChk() {
+    const c = h('input', { type: 'checkbox', 'data-path': 'mct.plateSub' }); c.checked = +S.inp.mct.plateSub === 3;
+    c.addEventListener('change', () => { S.inp.mct.plateSub = c.checked ? 3 : 1; changed(true); });
+    return h('label', { class: 'fld chk', style: 'flex:none;align-self:center;margin:0 0 0 auto;padding:0;min-height:0', title: 'MCT 판요소 종류(iSUB) : 체크하면 Thick (with Drilling DOF, iSUB = 3, 법선방향 회전 자유도 고려), 체크하지 않으면 Thick (without Drilling DOF, iSUB = 1). 같은 모델에서 with Drilling DOF가 받침 부근 웹 응력을 더 크게 계산합니다.' }, c, h('span', { class: 'lb', style: 'font-weight:700', text: 'With Drilling DOF' }));
+  }
   // *GROUP 블록 포함 : 체크박스만 눌러야 선택되고 (라벨 클릭으로는 변하지 않음), 아래에 부연 설명
   function groupChk() {
     const c = h('input', { type: 'checkbox', 'data-path': 'mct.groups', id: 'chkGroups' }); c.checked = !!getp(S.inp, 'mct.groups');
@@ -5028,7 +5061,7 @@ const OCRR = (function () {
       h('div', { id: 'caseWarn' })));
     root.appendChild(card('하중 조합', '재하 위치마다 LCB(자중 + 해당 활하중)가 자동 생성되고, 구성·계수는 표에서 수정할 수 있습니다. LCB는 하중 종류별 ENV1~ENV5로 묶이고, 모두 최종 ENV로 Envelope 됩니다.', h('div', { id: 'comboInfo' })));
     root.appendChild(card('MCT 파일', 'MIDAS Civil > File > Import > MIDAS Civil MCT file로 불러오세요.',
-      h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: downloadMct, text: 'MCT 파일 생성 · 다운로드' }), h('button', { class: 'btn', onclick: toggleMctPreview, text: 'MCT 미리보기' })),
+      h('div', { class: 'row' }, h('button', { class: 'btn primary', onclick: downloadMct, text: 'MCT 파일 생성 · 다운로드' }), h('button', { class: 'btn', onclick: toggleMctPreview, text: 'MCT 미리보기' }), plateSubChk()),
       h('pre', { id: 'mctPreview', class: 'pre hide' }),
       h('div', { class: 'info', html: '<b>해석 후 결과 반영 순서</b><br>① MCT Import → 해석 실행 (하중 조합 <code>LCB1~</code>은 General, <code>ENV1~ENV4</code>와 <code>ENV</code>는 Envelope로 정의됨)<br>② 판요소 응력표 : Results &gt; Result Tables &gt; Plate &gt; Stress (Global)를 하중 조합 ENV1~ENV4 별로 복사 또는 텍스트 저장<br>③ 변위표 : Result Tables &gt; Displacement<br>④ [4. 3D 결과] 탭에 붙여넣기 → 부재별 최대 Von-Mises 자동 추출, Contour 자동 생성<br>⑤ MIDAS 화면 캡처(응력 Contour)가 있으면 같은 탭에서 이미지를 붙여넣어 계산서에 그대로 사용' })));
     return decorate(root, '3', '3D 모델 · MCT');
